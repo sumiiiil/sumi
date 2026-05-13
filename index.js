@@ -4,8 +4,6 @@ const app = express();
 app.get("/", (_, res) => res.send("Modmail running"));
 app.listen(3000, () => console.log("Web server running"));
 
-const fs = require("fs");
-
 const {
   Client,
   GatewayIntentBits,
@@ -31,16 +29,14 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// ===== CONFIG =====
+// ================= CONFIG =================
 const GUILD_ID = "1387525349222645873";
 const FORUM_CHANNEL_ID = "1504256009365885029";
 const STAFF_ROLE_ID = "1500489431918837861";
-const PREFIX = "!";
 
-// ===== MEMORY CACHE =====
 const tickets = new Map();
 
 // ================= READY =================
@@ -50,15 +46,13 @@ client.once("ready", async () => {
   client.user.setPresence({
     activities: [
       {
-        name: "dm me for inquiries",
-        type: 1,
-        url: "https://twitch.tv/discord"
+        name: "dm me for inquiries"
       }
     ],
     status: "online"
   });
 
-  // RESTORE TICKETS
+  // restore tickets
   const { data } = await supabase
     .from("tickets")
     .select("*")
@@ -78,95 +72,84 @@ client.once("ready", async () => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // ================= COMMAND SYSTEM =================
-  if (message.guild && !message.channel.isThread()) {
-    if (message.content.startsWith(PREFIX)) {
-      const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-      const commandName = args.shift().toLowerCase();
-
-      const command = commands.get(commandName);
-      if (!command) return;
-
-      try {
-        await command.execute(message, args);
-      } catch (err) {
-        console.error(err);
-      }
-
-      return;
-    }
-  }
-
-  // ================= USER DM =================
+  // ================= DM USERS =================
   if (message.channel.isDMBased()) {
     const guild = await client.guilds.fetch(GUILD_ID);
     const forum = await guild.channels.fetch(FORUM_CHANNEL_ID);
 
     let ticketData = tickets.get(message.author.id);
+
     let thread;
 
-    // ===== CREATE NEW THREAD =====
-    if (!ticketData) {
-      thread = await forum.threads.create({
-        name: `ticket-${message.author.username}`,
-        message: {
-          content: `new thread from **${message.author.tag}**`
-        }
-      });
+    // ================= CHECK DUPLICATE SAFETY =================
+    if (ticketData) {
+      thread = await client.channels
+        .fetch(ticketData.threadId)
+        .catch(() => null);
 
-      const { data: dbTicket } = await supabase
-        .from("tickets")
-        .insert({
-          user_id: message.author.id,
-          thread_id: thread.id,
-          open: true
-        })
-        .select()
-        .single();
+      if (thread) {
+        await thread.send({
+          embeds: [
+            new EmbedBuilder()
+              .setDescription(message.content || "*no text*")
+              .setColor(0x90EE90)
+              .setAuthor({
+                name: message.author.tag,
+                iconURL: message.author.displayAvatarURL()
+              })
+          ]
+        });
+        return;
+      }
+    }
 
-      tickets.set(message.author.id, {
-        id: dbTicket.id,
-        threadId: thread.id
-      });
+    // ================= CREATE NEW THREAD =================
+    thread = await forum.threads.create({
+      name: `ticket-${message.author.username}`,
+      message: {
+        content: `new thread from **${message.author.tag}**`
+      }
+    });
 
-      // ===== YOUR ORIGINAL DM LAYOUT =====
-      await message.author.send({
+    // save to DB (safe upsert style)
+    const { data: dbTicket } = await supabase
+      .from("tickets")
+      .upsert({
+        user_id: message.author.id,
+        thread_id: thread.id,
+        open: true
+      })
+      .select()
+      .single();
+
+    tickets.set(message.author.id, {
+      id: dbTicket.id,
+      threadId: thread.id
+    });
+
+    // ================= DM USER (SAFE) =================
+    try {
+      const dm = await message.author.createDM();
+
+      await dm.send({
         embeds: [
           new EmbedBuilder()
-            .setTitle("<a:51_raindance:1412622961969598484>  ⋯ ⠀new thread opened")
+            .setTitle("new thread opened")
             .setDescription(
-              "please be patient while waiting for a response.\n" +
-              "if needed, ping staff in the server after 24h."
+              "please wait for staff reply.\nif needed, follow up after 24h."
             )
             .setColor(0x90EE90)
         ]
       });
-
-      // ===== YOUR ORIGINAL THREAD LAYOUT =====
-      await thread.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("new thread <a:51_raindance:1412622961969598484> ")
-            .setDescription(message.content || "*no text*")
-            .setColor(0x90EE90)
-            .setAuthor({
-              name: message.author.tag,
-              iconURL: message.author.displayAvatarURL()
-            })
-        ]
-      });
-
-      await message.react("<a:51_raindance:1412622961969598484>");
-      return;
+    } catch (err) {
+      console.log("❌ DM failed:", err);
     }
 
-    // ===== EXISTING THREAD =====
-    thread = await client.channels.fetch(ticketData.threadId).catch(() => null);
-    if (!thread) return;
-
+    // ================= SEND TO THREAD =================
     await thread.send({
       embeds: [
         new EmbedBuilder()
+          .setTitle("new ticket")
           .setDescription(message.content || "*no text*")
           .setColor(0x90EE90)
           .setAuthor({
@@ -179,7 +162,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ================= STAFF =================
+  // ================= STAFF REPLIES =================
   if (!message.guild) return;
 
   const isThread =
@@ -199,62 +182,49 @@ client.on("messageCreate", async (message) => {
 
   if (!ticket) return;
 
-  const userId = ticket.user_id;
-
   let user;
   try {
-    user = await client.users.fetch(userId);
+    user = await client.users.fetch(ticket.user_id);
   } catch {
     return;
   }
 
-  const content = message.content?.trim();
+  // ================= CLOSE COMMAND =================
+  if (message.content === "!close") {
+    await message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("thread closed")
+          .setDescription("ticket closed by staff")
+          .setColor(0x90EE90)
+      ]
+    });
 
-  // ================= COMMANDS =================
-  if (content.startsWith("!")) {
-
-    if (content === "!close") {
-
-      // ===== YOUR ORIGINAL CLOSE EMBED =====
-      await message.channel.send({
+    try {
+      await user.send({
         embeds: [
           new EmbedBuilder()
-            .setTitle("<a:51_leaves:1412620595593740338>  ⋯ ⠀thread closed")
-            .setDescription("ticket has been closed by staff.")
+            .setTitle("ticket closed")
+            .setDescription("you may open a new ticket anytime.")
             .setColor(0x90EE90)
         ]
       });
+    } catch {}
 
-      try {
-        await user.send({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle("<a:51_leaves:1412620595593740338>  ⋯ ⠀thread closed")
-              .setDescription(
-                "this ticket has been closed.\n" +
-                "send a new message to open a new thread."
-              )
-              .setColor(0x90EE90)
-          ]
-        });
-      } catch {}
+    await supabase
+      .from("tickets")
+      .update({ open: false })
+      .eq("id", ticket.id);
 
-      await supabase
-        .from("tickets")
-        .update({ open: false })
-        .eq("id", ticket.id);
+    tickets.delete(ticket.user_id);
 
-      tickets.delete(userId);
-
-      await message.channel.setArchived(true);
-
-      return;
-    }
+    await message.channel.setArchived(true);
+    await message.channel.setLocked(true);
 
     return;
   }
 
-  // ================= STAFF MESSAGE =================
+  // ================= STAFF MESSAGE -> USER =================
   try {
     await user.send({
       embeds: [
