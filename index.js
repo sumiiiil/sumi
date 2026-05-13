@@ -12,13 +12,7 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const { createClient } = require("@supabase/supabase-js");
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
+// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -26,76 +20,75 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent
   ],
-  partials: [Partials.Channel, Partials.Message, Partials.User]
+  partials: [
+    Partials.Channel,
+    Partials.Message,
+    Partials.User,
+    Partials.GuildMember
+  ]
 });
 
-// CONFIG
+// ================= CONFIG =================
 const GUILD_ID = "1387525349222645873";
 const FORUM_CHANNEL_ID = "1504256009365885029";
 const STAFF_ROLE_ID = "1500489431918837861";
 
+// ================= MEMORY =================
 const tickets = new Map();
 
-client.once("ready", async () => {
+// ================= READY =================
+client.once("ready", () => {
   console.log(`READY: ${client.user.tag}`);
 
   client.user.setPresence({
     activities: [{ name: "dm me for inquiries" }],
     status: "online"
   });
-
-  const { data } = await supabase
-    .from("tickets")
-    .select("*")
-    .eq("open", true);
-
-  for (const t of data || []) {
-    tickets.set(t.user_id, {
-      id: t.id,
-      threadId: t.thread_id
-    });
-  }
-
-  console.log(`Restored ${data?.length || 0} tickets`);
 });
 
-// ================= MAIN =================
+// ================= MESSAGE SYSTEM =================
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
+  console.log("MSG:", {
+    content: message.content,
+    guild: message.guild?.id || null,
+    channelType: message.channel.type
+  });
+
   try {
 
-    // ================= DM USERS (FIXED) =================
+    // ================= USER DM =================
     if (!message.guild) {
 
       const guild = await client.guilds.fetch(GUILD_ID);
       const forum = await guild.channels.fetch(FORUM_CHANNEL_ID);
 
-      let ticketData = tickets.get(message.author.id);
+      let ticket = tickets.get(message.author.id);
       let thread;
 
-      // EXISTING THREAD
-      if (ticketData) {
-        thread = await client.channels.fetch(ticketData.threadId).catch(() => null);
-
-        if (thread) {
-          await thread.send({
-            embeds: [
-              new EmbedBuilder()
-                .setDescription(message.content || "*no text*")
-                .setColor(0x90EE90)
-                .setAuthor({
-                  name: message.author.tag,
-                  iconURL: message.author.displayAvatarURL()
-                })
-            ]
-          });
-
-          return;
-        }
+      // CHECK EXISTING THREAD
+      if (ticket?.threadId) {
+        thread = await client.channels.fetch(ticket.threadId).catch(() => null);
       }
 
-      // CREATE THREAD
+      // IF THREAD EXISTS → SEND MESSAGE
+      if (thread) {
+        await thread.send({
+          embeds: [
+            new EmbedBuilder()
+              .setDescription(message.content || "*no text*")
+              .setColor(0x90EE90)
+              .setAuthor({
+                name: message.author.tag,
+                iconURL: message.author.displayAvatarURL()
+              })
+          ]
+        });
+        return;
+      }
+
+      // CREATE THREAD (ONLY ONCE)
       thread = await forum.threads.create({
         name: `ticket-${message.author.username}`,
         message: {
@@ -103,36 +96,25 @@ client.on("messageCreate", async (message) => {
         }
       });
 
-      const { data: dbTicket } = await supabase
-        .from("tickets")
-        .insert({
-          user_id: message.author.id,
-          thread_id: thread.id,
-          open: true
-        })
-        .select()
-        .single();
-
       tickets.set(message.author.id, {
-        id: dbTicket.id,
         threadId: thread.id
       });
 
-      // DM user (SAFE)
+      // DM USER CONFIRMATION
       try {
         await message.author.send({
           embeds: [
             new EmbedBuilder()
-              .setTitle("new thread opened")
-              .setDescription("please wait for staff reply")
+              .setTitle("ticket opened")
+              .setDescription("please wait for staff response")
               .setColor(0x90EE90)
           ]
         });
       } catch (err) {
-        console.log("DM failed:", err);
+        console.log("DM FAILED:", err);
       }
 
-      // THREAD MESSAGE
+      // SEND INITIAL MESSAGE
       await thread.send({
         embeds: [
           new EmbedBuilder()
@@ -149,9 +131,7 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // ================= STAFF REPLIES =================
-    if (!message.guild) return;
-
+    // ================= STAFF ONLY =================
     const isThread =
       message.channel.type === ChannelType.PublicThread ||
       message.channel.type === ChannelType.PrivateThread;
@@ -160,18 +140,17 @@ client.on("messageCreate", async (message) => {
 
     if (!message.member?.roles.cache.has(STAFF_ROLE_ID)) return;
 
-    const { data: ticket } = await supabase
-      .from("tickets")
-      .select("*")
-      .eq("thread_id", message.channel.id)
-      .eq("open", true)
-      .single();
+    const ticketEntry = [...tickets.entries()]
+      .find(([_, v]) => v.threadId === message.channel.id);
 
-    if (!ticket) return;
+    if (!ticketEntry) return;
 
-    const user = await client.users.fetch(ticket.user_id).catch(() => null);
+    const userId = ticketEntry[0];
+
+    const user = await client.users.fetch(userId).catch(() => null);
     if (!user) return;
 
+    // ================= CLOSE =================
     if (message.content === "!close") {
       await message.channel.send({
         embeds: [
@@ -182,21 +161,18 @@ client.on("messageCreate", async (message) => {
         ]
       });
 
-      await user.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("ticket closed")
-            .setDescription("you may open a new ticket anytime.")
-            .setColor(0x90EE90)
-        ]
-      }).catch(() => {});
+      try {
+        await user.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("ticket closed")
+              .setDescription("you may open a new ticket anytime.")
+              .setColor(0x90EE90)
+          ]
+        });
+      } catch {}
 
-      await supabase
-        .from("tickets")
-        .update({ open: false })
-        .eq("id", ticket.id);
-
-      tickets.delete(ticket.user_id);
+      tickets.delete(userId);
 
       await message.channel.setArchived(true);
       await message.channel.setLocked(true);
@@ -204,7 +180,7 @@ client.on("messageCreate", async (message) => {
       return;
     }
 
-    // STAFF MESSAGE → USER
+    // ================= STAFF REPLY =================
     await user.send({
       embeds: [
         new EmbedBuilder()
@@ -218,7 +194,7 @@ client.on("messageCreate", async (message) => {
     });
 
   } catch (err) {
-    console.log("GLOBAL ERROR:", err);
+    console.log("ERROR:", err);
   }
 });
 
