@@ -105,8 +105,11 @@ client.on("messageCreate", async (message) => {
         await message.author.send({
           embeds: [
             new EmbedBuilder()
-              .setTitle("ticket opened")
-              .setDescription("please wait for staff response")
+              .setTitle("<a:51_raindance:1412622961969598484>  ⋯ ⠀new thread opened")
+              .setDescription(
+                 "please be patient while waiting for a response.\n" +
+                 "if needed, ping staff in the server after 24h."
+            )
               .setColor(0x90EE90)
           ]
         });
@@ -155,8 +158,8 @@ client.on("messageCreate", async (message) => {
       await message.channel.send({
         embeds: [
           new EmbedBuilder()
-            .setTitle("thread closed")
-            .setDescription("ticket closed by staff")
+            .setTitle("<a:51_leaves:1412620595593740338> ⋯ ⠀thread closed")
+            .setDescription("ticket closed by staff.")
             .setColor(0x90EE90)
         ]
       });
@@ -165,8 +168,8 @@ client.on("messageCreate", async (message) => {
         await user.send({
           embeds: [
             new EmbedBuilder()
-              .setTitle("ticket closed")
-              .setDescription("you may open a new ticket anytime.")
+              .setTitle("<a:51_leaves:1412620595593740338> ⋯ ⠀thread closed")
+              .setDescription("this ticket has been closed.\n" + "send a new message to open a new thread." )
               .setColor(0x90EE90)
           ]
         });
