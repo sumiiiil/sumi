@@ -37,18 +37,16 @@ const GUILD_ID = "1387525349222645873";
 const FORUM_CHANNEL_ID = "1504256009365885029";
 const STAFF_ROLE_ID = "1500489431918837861";
 
+// ================= MEMORY =================
 const tickets = new Map();
+const processed = new Set();
 
 // ================= READY =================
 client.once("ready", async () => {
   console.log(`READY: ${client.user.tag}`);
 
   client.user.setPresence({
-    activities: [
-      {
-        name: "dm me for inquiries"
-      }
-    ],
+    activities: [{ name: "dm me for inquiries" }],
     status: "online"
   });
 
@@ -74,33 +72,37 @@ client.on("messageCreate", async (message) => {
 
   // ================= DM USERS =================
   if (message.channel.isDMBased()) {
+
+    // 🔒 anti duplicate processing
+    const key = `${message.id}-${message.author.id}`;
+    if (processed.has(key)) return;
+    processed.add(key);
+    setTimeout(() => processed.delete(key), 10000);
+
     const guild = await client.guilds.fetch(GUILD_ID);
     const forum = await guild.channels.fetch(FORUM_CHANNEL_ID);
 
     let ticketData = tickets.get(message.author.id);
+    let thread = null;
 
-    let thread;
-
-    // ================= CHECK DUPLICATE SAFETY =================
+    // ================= EXISTING THREAD =================
     if (ticketData) {
-      thread = await client.channels
-        .fetch(ticketData.threadId)
-        .catch(() => null);
+      thread = await client.channels.fetch(ticketData.threadId).catch(() => null);
+    }
 
-      if (thread) {
-        await thread.send({
-          embeds: [
-            new EmbedBuilder()
-              .setDescription(message.content || "*no text*")
-              .setColor(0x90EE90)
-              .setAuthor({
-                name: message.author.tag,
-                iconURL: message.author.displayAvatarURL()
-              })
-          ]
-        });
-        return;
-      }
+    if (thread) {
+      await thread.send({
+        embeds: [
+          new EmbedBuilder()
+            .setDescription(message.content || "*no text*")
+            .setColor(0x90EE90)
+            .setAuthor({
+              name: message.author.tag,
+              iconURL: message.author.displayAvatarURL()
+            })
+        ]
+      });
+      return;
     }
 
     // ================= CREATE NEW THREAD =================
@@ -111,7 +113,6 @@ client.on("messageCreate", async (message) => {
       }
     });
 
-    // save to DB (safe upsert style)
     const { data: dbTicket } = await supabase
       .from("tickets")
       .upsert({
@@ -127,7 +128,7 @@ client.on("messageCreate", async (message) => {
       threadId: thread.id
     });
 
-    // ================= DM USER (SAFE) =================
+    // ================= DM USER =================
     try {
       const dm = await message.author.createDM();
 
@@ -135,9 +136,7 @@ client.on("messageCreate", async (message) => {
         embeds: [
           new EmbedBuilder()
             .setTitle("new thread opened")
-            .setDescription(
-              "please wait for staff reply.\nif needed, follow up after 24h."
-            )
+            .setDescription("please wait for staff reply")
             .setColor(0x90EE90)
         ]
       });
@@ -145,11 +144,11 @@ client.on("messageCreate", async (message) => {
       console.log("❌ DM failed:", err);
     }
 
-    // ================= SEND TO THREAD =================
+    // ================= THREAD MESSAGE =================
     await thread.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle("new ticket")
+          .setTitle("new message")
           .setDescription(message.content || "*no text*")
           .setColor(0x90EE90)
           .setAuthor({
@@ -162,7 +161,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ================= STAFF REPLIES =================
+  // ================= GUILD / STAFF =================
   if (!message.guild) return;
 
   const isThread =
@@ -189,7 +188,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ================= CLOSE COMMAND =================
+  // ================= CLOSE =================
   if (message.content === "!close") {
     await message.channel.send({
       embeds: [
@@ -224,13 +223,13 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ================= STAFF MESSAGE -> USER =================
+  // ================= STAFF REPLY =================
   try {
     await user.send({
       embeds: [
         new EmbedBuilder()
           .setDescription(message.content)
-          .setColor(0x90EE90)
+          .setColor(0xffffff)
           .setAuthor({
             name: message.author.tag,
             iconURL: message.author.displayAvatarURL()
