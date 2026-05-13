@@ -40,15 +40,6 @@ const FORUM_CHANNEL_ID = "1504256009365885029";
 const STAFF_ROLE_ID = "1500489431918837861";
 const PREFIX = "!";
 
-// ===== COMMAND LOADER =====
-const commands = new Map();
-const commandFiles = fs.readdirSync("./commands").filter(f => f.endsWith(".js"));
-
-for (const file of commandFiles) {
-  const command = require(`./commands/${file}`);
-  commands.set(command.name, command);
-}
-
 // ===== MEMORY CACHE =====
 const tickets = new Map();
 
