@@ -54,6 +54,8 @@ client.user.setPresence({
   status: "online"
 });
 
+});
+
 // ================= MESSAGE SYSTEM =================
 client.on("messageCreate", async (message) => {
 
