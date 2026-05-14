@@ -37,18 +37,21 @@ const client = new Client({
 });
 
 // ================= CONFIG =================
-const GUILD_ID = "1387525349222645873";
-const FORUM_CHANNEL_ID = "1504256009365885029";
-const STAFF_ROLE_ID = "1500489431918837861";
+const GUILD_ID = "1386420176169468074";
+const FORUM_CHANNEL_ID = "1504461483176759458";
+const STAFF_ROLE_ID = "1414308563504857169";
 
 // ================= READY =================
 client.once("ready", () => {
   console.log(`READY: ${client.user.tag}`);
 
-  client.user.setPresence({
-    activities: [{ name: "dm me for inquiries" }],
-    status: "online"
-  });
+client.user.setPresence({
+  activities: [{
+    name: "dm me for inquiries",
+    type: 1,
+    url: "https://twitch.tv/discord"
+  }],
+  status: "online"
 });
 
 // ================= MESSAGE SYSTEM =================
