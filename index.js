@@ -72,23 +72,33 @@ client.on("messageCreate", async (message) => {
         thread = await client.channels.fetch(ticket.threadId).catch(() => null);
       }
 
+      // CREATE EMBED
+      const userEmbed = new EmbedBuilder()
+        .setDescription(message.content || "*no text*")
+        .setColor(0x90EE90)
+        .setAuthor({
+          name: message.author.tag,
+          iconURL: message.author.displayAvatarURL()
+        });
+
+      // IMAGE PREVIEW
+      const firstAttachment = message.attachments.first();
+
+      if (firstAttachment?.contentType?.startsWith("image")) {
+        userEmbed.setImage(firstAttachment.url);
+      }
+
       // IF THREAD EXISTS → SEND MESSAGE
       if (thread) {
         await thread.send({
-          embeds: [
-            new EmbedBuilder()
-              .setDescription(message.content || "*no text*")
-              .setColor(0x90EE90)
-              .setAuthor({
-                name: message.author.tag,
-                iconURL: message.author.displayAvatarURL()
-              })
-          ]
+          embeds: [userEmbed],
+          files: [...message.attachments.values()]
         });
+
         return;
       }
 
-      // CREATE THREAD (ONLY ONCE)
+      // CREATE THREAD
       thread = await forum.threads.create({
         name: `ticket-${message.author.username}`,
         message: {
@@ -107,9 +117,9 @@ client.on("messageCreate", async (message) => {
             new EmbedBuilder()
               .setTitle("<a:51_raindance:1412622961969598484>  ⋯ ⠀new thread opened")
               .setDescription(
-                 "please be patient while waiting for a response.\n" +
-                 "if needed, ping staff in the server after 24h."
-            )
+                "please be patient while waiting for a response.\n" +
+                "if needed, ping staff in the server after 24h."
+              )
               .setColor(0x90EE90)
           ]
         });
@@ -119,16 +129,8 @@ client.on("messageCreate", async (message) => {
 
       // SEND INITIAL MESSAGE
       await thread.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("new message")
-            .setDescription(message.content || "*no text*")
-            .setColor(0x90EE90)
-            .setAuthor({
-              name: message.author.tag,
-              iconURL: message.author.displayAvatarURL()
-            })
-        ]
+        embeds: [userEmbed],
+        files: [...message.attachments.values()]
       });
 
       return;
@@ -155,6 +157,7 @@ client.on("messageCreate", async (message) => {
 
     // ================= CLOSE =================
     if (message.content === "!close") {
+
       await message.channel.send({
         embeds: [
           new EmbedBuilder()
@@ -169,7 +172,10 @@ client.on("messageCreate", async (message) => {
           embeds: [
             new EmbedBuilder()
               .setTitle("<a:51_leaves:1412620595593740338> ⋯ ⠀thread closed")
-              .setDescription("this ticket has been closed.\n" + "send a new message to open a new thread." )
+              .setDescription(
+                "this ticket has been closed.\n" +
+                "send a new message to open a new thread."
+              )
               .setColor(0x90EE90)
           ]
         });
@@ -184,16 +190,24 @@ client.on("messageCreate", async (message) => {
     }
 
     // ================= STAFF REPLY =================
+    const staffEmbed = new EmbedBuilder()
+      .setDescription(message.content || "*no text*")
+      .setColor(0xffffff)
+      .setAuthor({
+        name: message.author.tag,
+        iconURL: message.author.displayAvatarURL()
+      });
+
+    // IMAGE PREVIEW
+    const firstAttachment = message.attachments.first();
+
+    if (firstAttachment?.contentType?.startsWith("image")) {
+      staffEmbed.setImage(firstAttachment.url);
+    }
+
     await user.send({
-      embeds: [
-        new EmbedBuilder()
-          .setDescription(message.content)
-          .setColor(0xffffff)
-          .setAuthor({
-            name: message.author.tag,
-            iconURL: message.author.displayAvatarURL()
-          })
-      ]
+      embeds: [staffEmbed],
+      files: [...message.attachments.values()]
     });
 
   } catch (err) {
